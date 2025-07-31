@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor METAR/SPECI</title>
+    <style>
+        :root {
+            --primary-color: #1a3a5f;
+            --secondary-color: #2c5f8e;
+            --accent-color: #5d9bc3;
+            --background-color: #f5f7fa;
+            --text-color: #333;
+            --alert-color: #d9534f;
+            --success-color: #5cb85c;
+            --warning-color: #f0ad4e;
+            --border-radius: 8px;
+            --box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--background-color);
+            padding: 20px;
+        }
+        
+        header {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 20px;
+            border-radius: var(--border-radius);
+            margin-bottom: 20px;
+            text-align: center;
+            box-shadow: var(--box-shadow);
+        }
+        
+        header h1 {
+            margin-bottom: 5px;
+        }
+        
+        .container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+        
+        @media (min-width: 768px) {
+            .container {
+                grid-template-columns: 2fr 1fr;
+            }
+        }
+        
+        .card {
+            background-color: white;
+            border-radius: var(--border-radius);
+            padding: 20px;
+            box-shadow: var(--box-shadow);
+        }
+        
+        .status-panel {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+        
+        .status-icon {
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        
+        .status-normal {
+            background-color: var(--success-color);
+        }
+        
+        .status-warning {
+            background-color: var(--warning-color);
+        }
+        
+        .status-error {
+            background-color: var(--alert-color);
+        }
+        
+        .metar-display {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: var(--border-radius);
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+            margin-bottom: 10px;
+            min-height: 100px;
+            border: 1px solid #ddd;
+        }
+        
+        .metar-time {
+            font-size: 0.9rem;
+            color: #666;
+            margin-bottom: 20px;
+        }
+        
+        .alert-panel {
+            background-color: var(--alert-color);
+            color: white;
+            padding: 15px;
+            border-radius: var(--border-radius);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .alert-panel button {
+            background-color: white;
+            color: var(--alert-color);
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        .history-panel h3 {
+            margin-bottom: 15px;
+        }
+        
+        .history-item {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .history-item:last-child {
+            border-bottom: none;
+            margin-bottom: 0; /* Ensure no extra margin at the end */
+        }
+        
+        .history-metar {
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        
+        .history-time {
+            font-size: 0.8rem;
+            color: #666;
+        }
+        
+        .settings-panel {
+            margin-top: 20px;
+        }
+        
+        .settings-panel h3 {
+            margin-bottom: 15px;
+        }
+        
+        .settings-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 15px;
+        }
+        
+        .setting {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start; /* ALINHAMENTO À ESQUERDA APLICADO AQUI */
+            gap: 10px; /* Adiciona um pequeno espaço entre os itens */
+        }
+        
+        footer {
+            margin-top: 30px;
+            text-align: center;
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        footer a {
+            color: var(--secondary-color);
+            text-decoration: none;
+        }
+
+        footer .developed-by {
+            font-weight: bold;
+            font-size: 1.1rem;
+            margin-top: 10px;
+            color: var(--primary-color); /* Cor para destaque */
+        }
+        
+        .no-history {
+            color: #666;
+            font-style: italic;
+        }
+        
+        @media (max-width: 480px) {
+            .status-panel {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .status-item {
+                margin-bottom: 10px;
+            }
+        }
+        
+        /* Animação para o alerta */
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .alert-active {
+            animation: pulse 1s infinite;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Monitor METAR/SPECI</h1>
+        <h2>Aeroporto de SBIZ</h2>
+    </header>
+    
+    <div class="container">
+        <div class="main-content">
+            <div class="card">
+                <div class="status-panel">
+                    <div class="status-item">
+                        <div id="statusIcon" class="status-icon status-normal"></div>
+                        <span>Status: <strong id="statusValue">Iniciando...</strong></span>
+                    </div>
+                    <div class="status-item">
+                        <span>Última verificação: <strong id="lastCheckTime">--:--:--</strong></span>
+                    </div>
+                    <div class="status-item">
+                        <span>Próxima verificação: <strong id="nextCheckTime">--:--:--</strong></span>
+                    </div>
+                    <div class="status-item">
+                        <span>Tempo para próxima hora: <strong id="countdown">--:--</strong></span>
+                    </div>
+                </div>
+                
+                <div id="alertPanel" class="alert-panel">
+                    <div id="alertMessage">ALERTA: Nenhum METAR/SPECI detectado na hora cheia!</div>
+                    <button id="silenceButton">Silenciar</button>
+                </div>
+                
+                <h3>ÚLTIMO METAR/SPECI DA HORA ATUAL</h3>
+                <div id="metarRaw" class="metar-display">Aguardando dados...</div>
+                <div id="metarTime" class="metar-time"></div>
+            </div>
+            
+            <div class="settings-panel">
+                <h3>Configurações</h3>
+                <div class="settings-container">
+                    <div class="setting">
+                        <label for="aerodromoInput">Código do Aeródromo:</label>
+                        <input type="text" id="aerodromoInput" value="SBIZ" maxlength="4" style="text-transform: uppercase; width: 80px; padding: 5px; font-size: 1rem;">
+                        <button id="alterarAerodromo" style="margin-left: 10px; padding: 5px 10px; background-color: var(--secondary-color); color: white; border: none; border-radius: 4px; cursor: pointer;">Alterar</button>
+                    </div>
+                    <div class="setting">
+                        <label for="volumeControl">Volume do Alarme:</label>
+                        <input type="range" id="volumeControl" min="0" max="1" step="0.1" value="0.7">
+                    </div>
+                    <div class="setting">
+                        <label for="autoRefresh">Atualização Automática:</label>
+                        <input type="checkbox" id="autoRefresh" checked>
+                    </div>
+                    <div class="setting">
+                        <label for="useLocalMode">Usar Backend Local:</label>
+                        <input type="checkbox" id="useLocalMode" checked>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="sidebar">
+            <div class="card history-panel">
+                <h3>Histórico de METAR/SPECI</h3>
+                <div id="historyContainer">
+                    <p class="no-history">Nenhum histórico disponível</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>Desenvolvido para monitoramento de METAR/SPECI - SBIZ - 2025</p>
+        <p>Dados fornecidos pela <a href="https://redemet.decea.mil.br/" target="_blank">REDEMET</a></p>
+        <p class="developed-by">Desenvolvido pela DNIZ</p>
+    </footer>
+
+    <audio id="alertSound" src="https://cdn.freesound.org/previews/250/250629_4486188-lq.mp3" preload="auto"></audio>
+    
+    <script>
+        // Configurações da aplicação
+        const CONFIG = {
+            localidade: 'SBIZ', // Código ICAO do aeródromo a ser monitorado
+            apiKey: 'ttMZrBTp4mD0xMkYAVxKMzyu7B9KL1nfCS6T1fMR', // SUA CHAVE PRIVADA AQUI
+            backendUrl: 'http://127.0.0.1:5000/api/metar', // URL do seu servidor Python (Modo Local)
+            intervaloConsulta: 60000, // Intervalo de consulta da API em milissegundos (1 minuto)
+            tempoAlerta: 1, // Minutos após a hora cheia para acionar o alerta se nenhum METAR for encontrado
+            volumeAlarme: 0.7, // Volume inicial do alarme (0 a 1)
+            maxHistorico: 10 // Número máximo de itens no histórico
+        };
+
+        // Referências aos elementos DOM
+        const elements = {
+            statusValue: document.getElementById('statusValue'),
+            statusIcon: document.getElementById('statusIcon'),
+            lastCheckTime: document.getElementById('lastCheckTime'),
+            nextCheckTime: document.getElementById('nextCheckTime'),
+            countdown: document.getElementById('countdown'),
+            metarRaw: document.getElementById('metarRaw'),
+            metarTime: document.getElementById('metarTime'),
+            alertPanel: document.getElementById('alertPanel'),
+            alertMessage: document.getElementById('alertMessage'),
+            silenceButton: document.getElementById('silenceButton'),
+            historyContainer: document.getElementById('historyContainer'),
+            volumeControl: document.getElementById('volumeControl'),
+            autoRefresh: document.getElementById('autoRefresh'),
+            useLocalMode: document.getElementById('useLocalMode'),
+            alertSound: document.getElementById('alertSound'),
+            aerodromoInput: document.getElementById('aerodromoInput'),
+            alterarAerodromo: document.getElementById('alterarAerodromo')
+        };
+
+        // Estado da aplicação
+        const state = {
+            ultimoMetarCompleto: null,
+            ultimaHoraVerificada: null,
+            metarHoraAtualEncontrado: false,
+            emAlerta: false,
+            alarmeSilenciado: false,
+            historicoMetar: [],
+            consultaAtiva: true,
+            intervalId: null,
+            rapidCheckIntervalId: null,
+            modoLocal: true, // Inicia usando o backend por padrão
+            consultaProgramada: false,
+            consultaMinutoAtivo: false
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            inicializarApp();
+        });
+
+        function inicializarApp() {
+            elements.volumeControl.value = CONFIG.volumeAlarme;
+            elements.alertSound.volume = CONFIG.volumeAlarme;
+            elements.alertPanel.style.display = 'none';
+            
+            elements.silenceButton.addEventListener('click', silenciarAlarme);
+            elements.volumeControl.addEventListener('change', ajustarVolume);
+            elements.autoRefresh.addEventListener('change', toggleAutoRefresh);
+            elements.useLocalMode.addEventListener('change', toggleModoLocal);
+            elements.alterarAerodromo.addEventListener('click', alterarAerodromo);
+            
+            elements.aerodromoInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    alterarAerodromo();
+                }
+            });
+            
+            carregarPreferencias();
+            
+            consultarMetar();
+            state.intervalId = setInterval(consultarMetar, CONFIG.intervaloConsulta);
+            
+            verificarHoraCheia();
+            setInterval(verificarHoraCheia, 1000);
+            
+            atualizarContagemRegressiva();
+            setInterval(atualizarContagemRegressiva, 1000);
+            
+            atualizarTituloAerodromo();
+        }
+        
+        // --- FUNÇÃO DE CONSULTA MODIFICADA ---
+        async function consultarMetar() {
+            if (!state.consultaAtiva) return;
+
+            atualizarStatus('Consultando...', 'warning');
+            elements.metarRaw.textContent = "Aguardando dados...";
+            elements.metarTime.textContent = "";
+
+            // SE O MODO LOCAL (BACKEND PYTHON) ESTIVER ATIVO
+            if (state.modoLocal) {
+                try {
+                    console.log(`Chamando backend Python: ${CONFIG.backendUrl}?local=${CONFIG.localidade}`);
+                    const response = await fetch(`${CONFIG.backendUrl}?local=${CONFIG.localidade}`);
+                    if (!response.ok) {
+                        const errorJson = await response.json().catch(() => ({}));
+                        throw new Error(errorJson.error || `Erro do backend: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    if (data.metar && data.metar.trim()) {
+                        processarResposta(data.metar);
+                    } else {
+                        throw new Error("Backend retornou dados METAR vazios.");
+                    }
+                } catch (error) {
+                    console.error(`Falha ao obter METAR via backend: ${error.message}`);
+                    atualizarStatus('Erro: Falha no Backend', 'error');
+                }
+            // SE O MODO LOCAL ESTIVER DESATIVADO (USA API PRIVADA DIRETAMENTE)
+            } else {
+                const privateApiUrl = `https://api-redemet.decea.mil.br/mensagens/metar/${CONFIG.localidade}?api_key=${CONFIG.apiKey}`;
+                try {
+                    console.log(`Chamando API privada REDEMET`);
+                    const response = await fetch(privateApiUrl);
+                    if (!response.ok) {
+                        throw new Error(`Erro na API REDEMET: ${response.status} - ${response.statusText}`);
+                    }
+                    const data = await response.json();
+                    
+                    // A API privada retorna os dados em um formato aninhado
+                    const metarText = data?.data?.data[0]?.mens;
+                    
+                    if (metarText) {
+                        processarResposta(metarText);
+                        atualizarStatus('OK', 'normal');
+                    } else {
+                        throw new Error("API privada não retornou mensagem METAR para " + CONFIG.localidade);
+                    }
+                } catch (error) {
+                    console.error(`Falha ao obter METAR da API privada: ${error.message}`);
+                    atualizarStatus('Erro: API Privada', 'error');
+                    elements.metarRaw.textContent = `Erro ao consultar a API Privada: ${error.message}`;
+                }
+            }
+        }
+        
+        // As outras funções permanecem as mesmas do seu código original
+        // (processarResposta, alterarAerodromo, carregarPreferencias, etc.)
+        // O código foi omitido aqui para ser breve, mas deve ser incluído no seu arquivo final.
+        // O corpo da função `consultarMetar` é a principal mudança. Cole todas as outras funções
+        // do seu script original abaixo desta linha.
+
+        function alterarAerodromo() {
+            const novoAerodromo = elements.aerodromoInput.value.trim().toUpperCase();
+            if (!/^[A-Z]{4}$/.test(novoAerodromo)) {
+                alert('Por favor, insira um código ICAO válido (4 letras).');
+                return;
+            }
+            CONFIG.localidade = novoAerodromo;
+            state.ultimoMetarCompleto = null;
+            state.metarHoraAtualEncontrado = false;
+            state.historicoMetar = [];
+            elements.metarRaw.textContent = "Aguardando dados...";
+            elements.metarTime.textContent = "";
+            elements.historyContainer.innerHTML = '<p class="no-history">Nenhum histórico disponível</p>';
+            atualizarTituloAerodromo();
+            consultarMetar();
+            try {
+                localStorage.setItem('aerodromo', CONFIG.localidade);
+            } catch (e) {
+                console.error('Erro ao salvar aeródromo:', e);
+            }
+        }
+
+        function atualizarTituloAerodromo() {
+            const tituloH2 = document.querySelector('header h2');
+            if (tituloH2) {
+                tituloH2.textContent = `Aeroporto de ${CONFIG.localidade}`;
+            }
+            const rodape = document.querySelector('footer p:first-child');
+            if (rodape) {
+                rodape.textContent = `Desenvolvido para monitoramento de METAR/SPECI - ${CONFIG.localidade} - 2025`;
+            }
+            document.title = `Monitor METAR - ${CONFIG.localidade}`;
+        }
+
+        function carregarPreferencias() {
+            try {
+                const volumeSalvo = localStorage.getItem('volumeAlarme');
+                if (volumeSalvo !== null) {
+                    elements.volumeControl.value = volumeSalvo;
+                    elements.alertSound.volume = parseFloat(volumeSalvo);
+                }
+                const autoRefreshSalvo = localStorage.getItem('autoRefresh');
+                if (autoRefreshSalvo !== null) {
+                    elements.autoRefresh.checked = autoRefreshSalvo === 'true';
+                    state.consultaAtiva = elements.autoRefresh.checked;
+                }
+                const modoLocalSalvo = localStorage.getItem('modoLocal');
+                if (modoLocalSalvo !== null) {
+                    elements.useLocalMode.checked = modoLocalSalvo === 'true';
+                    state.modoLocal = elements.useLocalMode.checked;
+                }
+                const aerodromoSalvo = localStorage.getItem('aerodromo');
+                if (aerodromoSalvo !== null) {
+                    CONFIG.localidade = aerodromoSalvo;
+                    elements.aerodromoInput.value = aerodromoSalvo;
+                    atualizarTituloAerodromo();
+                }
+            } catch (e) {
+                console.error('Erro ao carregar preferências:', e);
+            }
+        }
+
+        function salvarPreferencias() {
+            try {
+                localStorage.setItem('volumeAlarme', elements.volumeControl.value);
+                localStorage.setItem('autoRefresh', elements.autoRefresh.checked);
+                localStorage.setItem('modoLocal', elements.useLocalMode.checked);
+            } catch (e) {
+                console.error('Erro ao salvar preferências:', e);
+            }
+        }
+
+        function ajustarVolume() {
+            elements.alertSound.volume = elements.volumeControl.value;
+            salvarPreferencias();
+        }
+
+        function toggleAutoRefresh() {
+            state.consultaAtiva = elements.autoRefresh.checked;
+            if (state.consultaAtiva) {
+                if (!state.intervalId) {
+                    state.intervalId = setInterval(consultarMetar, CONFIG.intervaloConsulta);
+                }
+            } else {
+                if (state.intervalId) {
+                    clearInterval(state.intervalId);
+                    state.intervalId = null;
+                }
+            }
+            salvarPreferencias();
+        }
+
+        function toggleModoLocal() {
+            state.modoLocal = elements.useLocalMode.checked;
+            salvarPreferencias();
+            consultarMetar(); // Força a atualização com o novo modo
+        }
+
+        function formatarHora(data) {
+            return data.toTimeString().split(' ')[0];
+        }
+
+        function atualizarContagemRegressiva() {
+            const agora = new Date();
+            const proximaHora = new Date(agora);
+            proximaHora.setUTCHours(agora.getUTCHours() + 1);
+            proximaHora.setUTCMinutes(0);
+            proximaHora.setUTCSeconds(0);
+            proximaHora.setUTCMilliseconds(0);
+            const diferenca = proximaHora - agora;
+            const minutos = Math.floor((diferenca % (1000 * 60 * 60)) / (1000 * 60));
+            const segundos = Math.floor((diferenca % (1000 * 60)) / 1000);
+            elements.countdown.textContent = `${minutos.toString().padStart(2, '0')}:${segundos.toString().padStart(2, '0')}`;
+            if (state.consultaAtiva) {
+                const proximaVerificacao = new Date(agora.getTime() + CONFIG.intervaloConsulta);
+                elements.nextCheckTime.textContent = formatarHora(proximaVerificacao);
+            } else {
+                elements.nextCheckTime.textContent = 'Pausado';
+            }
+        }
+
+        function atualizarStatus(texto, tipo) {
+            elements.statusValue.textContent = texto;
+            elements.statusIcon.className = 'status-icon';
+            elements.statusIcon.classList.add(`status-${tipo}`);
+        }
+
+        function adicionarAoHistorico(metar, timestamp, horaUTC) {
+            const indexExistente = state.historicoMetar.findIndex(item => item.horaUTC === horaUTC);
+            const item = { metar, timestamp, horaUTC };
+            if (indexExistente !== -1) {
+                state.historicoMetar[indexExistente] = item;
+            } else {
+                state.historicoMetar.unshift(item);
+            }
+            if (state.historicoMetar.length > CONFIG.maxHistorico) {
+                state.historicoMetar.pop();
+            }
+            atualizarHistorico();
+        }
+
+        function atualizarHistorico() {
+            if (state.historicoMetar.length === 0) {
+                elements.historyContainer.innerHTML = '<p class="no-history">Nenhum histórico disponível</p>';
+                return;
+            }
+            let html = '';
+            const historicoOrdenado = [...state.historicoMetar].sort((a, b) => b.timestamp - a.timestamp);
+            historicoOrdenado.forEach(item => {
+                html += `
+                <div class="history-item">
+                    <div class="history-metar">${item.metar}</div>
+                    <div class="history-time">Recebido em: ${formatarHora(item.timestamp)} (Hora METAR: ${item.horaUTC.toString().padStart(2, '0')}Z)</div>
+                </div>`;
+            });
+            elements.historyContainer.innerHTML = html;
+        }
+        
+        function processarResposta(text) {
+            if (!text || text.trim() === '') {
+                console.error('Resposta vazia da API ao processar.');
+                atualizarStatus('Erro: Dados vazios', 'error');
+                return;
+            }
+            
+            const agora = new Date();
+            elements.lastCheckTime.textContent = formatarHora(agora);
+            
+            const metarCompleto = text.trim();
+            console.log("Processando resposta:", metarCompleto);
+
+            const regexMetarInfo = new RegExp(`(METAR|SPECI)\\s+(${CONFIG.localidade})\\s+(\\d{2})(\\d{2})\\d{2}Z`);
+            const match = metarCompleto.match(regexMetarInfo);
+
+            if (match) {
+                const metarDay = parseInt(match[3], 10);
+                const metarHour = parseInt(match[4], 10);
+                const currentUTCHour = agora.getUTCHours();
+                const currentUTCDay = agora.getUTCDate();
+                
+                elements.metarRaw.textContent = metarCompleto;
+                elements.metarTime.textContent = `Recebido em: ${formatarHora(agora)} - Hora do METAR: ${match[3]}${match[4]}00Z`;
+                state.ultimoMetarCompleto = metarCompleto;
+
+                if (metarHour === currentUTCHour && metarDay === currentUTCDay) {
+                    state.metarHoraAtualEncontrado = true;
+                    desativarAlerta();
+                    console.log(`METAR/SPECI da hora atual (${metarHour}Z) encontrado.`);
+                    atualizarStatus('OK', 'normal');
+                } else {
+                    console.log(`METAR recebido (${metarHour}Z) não é da hora atual (${currentUTCHour}Z).`);
+                    atualizarStatus('METAR Antigo', 'warning');
+                }
+                
+                adicionarAoHistorico(metarCompleto, agora, metarHour);
+            } else {
+                elements.metarRaw.textContent = metarCompleto;
+                elements.metarTime.textContent = `METAR recebido, mas formato não reconhecido para extrair hora.`;
+                state.ultimoMetarCompleto = metarCompleto;
+                atualizarStatus('Formato Inesperado', 'warning');
+            }
+        }
+        
+        function verificarHoraCheia() {
+            const agora = new Date();
+            const minutos = agora.getUTCMinutes();
+            const segundos = agora.getUTCSeconds();
+            const horaAtual = agora.getUTCHours();
+            
+            if (minutos === 0 && segundos === 0) {
+                if (state.ultimaHoraVerificada !== horaAtual) {
+                    console.log(`Hora cheia (${horaAtual}:00Z) detectada. Resetando flag.`);
+                    state.metarHoraAtualEncontrado = false;
+                    state.alarmeSilenciado = false; // Permite que o alarme toque na próxima hora
+                    state.ultimaHoraVerificada = horaAtual;
+                    desativarAlerta(); // Garante que o alerta seja limpo no início da hora
+                }
+            }
+
+            if (minutos >= CONFIG.tempoAlerta && !state.metarHoraAtualEncontrado && !state.emAlerta) {
+                console.log(`Alerta ativado: Passaram ${CONFIG.tempoAlerta} minuto(s) da hora e nenhum METAR da hora ${horaAtual}Z foi encontrado.`);
+                ativarAlerta();
+            }
+        }
+
+        function ativarAlerta() {
+            if (state.emAlerta) return;
+            state.emAlerta = true;
+            elements.alertPanel.style.display = 'flex';
+            elements.alertPanel.classList.add('alert-active');
+            if (!state.alarmeSilenciado) {
+                elements.alertSound.play().catch(e => console.error("Erro ao tocar som de alerta:", e));
+            }
+        }
+
+        function desativarAlerta() {
+            if (!state.emAlerta) return;
+            state.emAlerta = false;
+            elements.alertPanel.style.display = 'none';
+            elements.alertPanel.classList.remove('alert-active');
+            elements.alertSound.pause();
+            elements.alertSound.currentTime = 0;
+        }
+
+        function silenciarAlarme() {
+            state.alarmeSilenciado = true;
+            desativarAlerta(); // Para o alarme visual e sonoro imediatamente
+            console.log("Alarme silenciado para a hora atual.");
+        }
+    </script>
+</body>
+</html>
