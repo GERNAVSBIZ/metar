@@ -48,15 +48,28 @@
         footer a { color: var(--secondary-color); text-decoration: none; }
         footer .developed-by { font-weight: bold; font-size: 1.1rem; margin-top: 10px; color: var(--primary-color); }
         .no-history { color: #666; font-style: italic; }
+        .audio-unlock-prompt {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background-color: var(--warning-color);
+            color: black;
+            text-align: center;
+            padding: 10px;
+            z-index: 1000;
+            font-weight: bold;
+        }
         @media (max-width: 480px) { .status-panel { flex-direction: column; align-items: flex-start; } .status-item { margin-bottom: 10px; } }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
         .alert-active { animation: pulse 1s infinite; }
     </style>
 </head>
 <body>
+    <div id="audioUnlockPrompt" class="audio-unlock-prompt">Clique em qualquer lugar da página para habilitar o som do alarme.</div>
     <header>
         <h1>Monitor METAR/SPECI</h1>
-        <h2>Aeroporto de SBIZ</h2>
+        <h2 id="aerodromoHeader">Aeroporto de SBIZ</h2>
     </header>
     
     <div class="container">
@@ -119,7 +132,7 @@
     </div>
 
     <footer>
-        <p>Desenvolvido para monitoramento de METAR/SPECI - SBIZ - 2025</p>
+        <p id="footerText">Desenvolvido para monitoramento de METAR/SPECI - SBIZ - 2025</p>
         <p>Dados fornecidos pela <a href="https://redemet.decea.mil.br/" target="_blank">REDEMET</a></p>
         <p class="developed-by">Desenvolvido pela DNIZ</p>
     </footer>
@@ -127,18 +140,16 @@
     <audio id="alertSound" src="https://cdn.freesound.org/previews/250/250629_4486188-lq.mp3" preload="auto"></audio>
     
     <script>
-        // Configurações da aplicação
         const CONFIG = {
             localidade: 'SBIZ',
-            // A CHAVE DE API FOI REMOVIDA DAQUI PARA SEGURANÇA
-            backendUrl: 'http://127.0.0.1:5000/api/metar', // URL do seu servidor Python
+            apiKey: 'ttMZrBTp4mD0xMkYAVxKMzyu7B9KL1nfCS6T1fMR',
+            apiUrl: 'https://api-redemet.decea.mil.br/mensagens/metar/',
             intervaloConsulta: 40000,
-            tempoAlerta: 2,
+            tempoAlerta: 2, 
             volumeAlarme: 0.7,
             maxHistorico: 10
         };
 
-        // Referências aos elementos DOM
         const elements = {
             statusValue: document.getElementById('statusValue'),
             statusIcon: document.getElementById('statusIcon'),
@@ -155,10 +166,12 @@
             autoRefresh: document.getElementById('autoRefresh'),
             alertSound: document.getElementById('alertSound'),
             aerodromoInput: document.getElementById('aerodromoInput'),
-            alterarAerodromo: document.getElementById('alterarAerodromo')
+            alterarAerodromo: document.getElementById('alterarAerodromo'),
+            aerodromoHeader: document.getElementById('aerodromoHeader'),
+            footerText: document.getElementById('footerText'),
+            audioUnlockPrompt: document.getElementById('audioUnlockPrompt')
         };
 
-        // Estado da aplicação
         const state = {
             ultimoMetarCompleto: null,
             ultimaHoraVerificada: null,
@@ -168,85 +181,89 @@
             historicoMetar: [],
             consultaAtiva: true,
             intervalId: null,
+            audioUnlocked: false
         };
 
-        document.addEventListener('DOMContentLoaded', () => {
-            inicializarApp();
-        });
+        document.addEventListener('DOMContentLoaded', inicializarApp);
+
+        function unlockAudio() {
+            if (state.audioUnlocked) return;
+            elements.alertSound.play().then(() => {
+                elements.alertSound.pause();
+                elements.alertSound.currentTime = 0;
+                state.audioUnlocked = true;
+                elements.audioUnlockPrompt.style.display = 'none';
+                console.log("Áudio habilitado pelo usuário.");
+            }).catch(e => {});
+            document.removeEventListener('click', unlockAudio);
+        }
 
         function inicializarApp() {
             elements.alertSound.volume = CONFIG.volumeAlarme;
-            
             elements.silenceButton.addEventListener('click', silenciarAlarme);
             elements.volumeControl.addEventListener('input', ajustarVolume);
             elements.autoRefresh.addEventListener('change', toggleAutoRefresh);
             elements.alterarAerodromo.addEventListener('click', alterarAerodromo);
-            
             elements.aerodromoInput.addEventListener('keypress', e => { if (e.key === 'Enter') alterarAerodromo(); });
             
+            document.addEventListener('click', unlockAudio);
+
             carregarPreferencias();
-            
-            consultarMetar(); // Primeira consulta
+            consultarMetar(); 
             state.intervalId = setInterval(consultarMetar, CONFIG.intervaloConsulta);
-            
             setInterval(verificarHoraCheia, 1000);
             setInterval(atualizarContagemRegressiva, 1000);
-            
             atualizarTituloAerodromo();
         }
         
-        // --- FUNÇÃO DE CONSULTA SEGURA E SIMPLIFICADA ---
+        // --- FUNÇÃO DE CONSULTA ATUALIZADA E MAIS ROBUSTA ---
         async function consultarMetar() {
             if (!state.consultaAtiva) return;
 
             atualizarStatus('Consultando...', 'warning');
             
-            // A URL agora inclui o parâmetro 'local' que o backend espera
-            const url = `${CONFIG.backendUrl}?local=${CONFIG.localidade}`;
+            const url = `${CONFIG.apiUrl}${CONFIG.localidade}?api_key=${CONFIG.apiKey}`;
 
             try {
-                console.log(`Chamando backend em: ${url}`);
                 const response = await fetch(url);
-                
-                // Pega a resposta JSON para analisar o sucesso ou erro
                 const data = await response.json();
 
-                if (!response.ok) {
-                    // Usa a mensagem de erro vinda do nosso backend
-                    throw new Error(data.error || `Erro do Backend: ${response.status}`);
+                if (!data.status) {
+                     throw new Error(data.message || `API retornou status 'false'`);
                 }
-                
-                if (data.metar && data.metar.trim()) {
-                    processarResposta(data.metar);
+
+                if (data.data && data.data.data && data.data.data.length > 0) {
+                    const metarMessage = data.data.data[0].mens;
+                    processarResposta(metarMessage);
                     atualizarStatus('OK', 'normal');
                 } else {
-                    throw new Error("Backend não retornou um METAR válido.");
+                    throw new Error(`Não há METAR recente disponível para ${CONFIG.localidade}.`);
                 }
 
             } catch (error) {
-                console.error(`Carregando... ${error.message}`);
+                console.error(`Erro ao consultar METAR: ${error.message}`);
                 atualizarStatus('Erro', 'error');
-                elements.metarRaw.textContent = `Buscando o novo METAR/SPECI.\nVerifique se o backend (app.py) está em execução.\n\nDetalhe: ${error.message}`;
+                elements.metarRaw.textContent = `Falha ao buscar METAR/SPECI.\nVerifique o código do aeródromo e a conexão.\n\nDetalhe: ${error.message}`;
             }
         }
         
-        // O restante do seu código JavaScript original permanece igual
-        // (processarResposta, alterarAerodromo, etc.)
-        // Cole as funções restantes do seu script aqui.
         function processarResposta(text) {
             const agora = new Date();
             elements.lastCheckTime.textContent = formatarHora(agora);
             const metarCompleto = text.trim();
             const regexMetarInfo = new RegExp(`(METAR|SPECI)\\s+(${CONFIG.localidade})\\s+(\\d{2})(\\d{2})\\d{2}Z`);
             const match = metarCompleto.match(regexMetarInfo);
+            
             if (match) {
                 const metarDay = parseInt(match[3], 10);
                 const metarHour = parseInt(match[4], 10);
                 const currentUTCHour = agora.getUTCHours();
                 const currentUTCDay = agora.getUTCDate();
+                
                 elements.metarRaw.textContent = metarCompleto;
                 elements.metarTime.textContent = `Recebido em: ${formatarHora(agora)} - Hora do METAR: ${match[3]}${match[4]}00Z`;
                 state.ultimoMetarCompleto = metarCompleto;
+                
                 if (metarHour === currentUTCHour && metarDay === currentUTCDay) {
                     state.metarHoraAtualEncontrado = true;
                     desativarAlerta();
@@ -257,6 +274,7 @@
                 elements.metarTime.textContent = `METAR recebido, mas formato não reconhecido para extrair hora.`;
             }
         }
+
         function alterarAerodromo() {
             const novoAerodromo = elements.aerodromoInput.value.trim().toUpperCase();
             if (!/^[A-Z]{4}$/.test(novoAerodromo)) {
@@ -270,11 +288,14 @@
             consultarMetar();
             localStorage.setItem('aerodromo', CONFIG.localidade);
         }
+
         function atualizarTituloAerodromo() {
-            document.querySelector('header h2').textContent = `Aeroporto de ${CONFIG.localidade}`;
-            document.querySelector('footer p:first-child').textContent = `Desenvolvido para monitoramento de METAR/SPECI - ${CONFIG.localidade} - 2025`;
+            const novoTitulo = `Aeroporto de ${CONFIG.localidade}`;
+            elements.aerodromoHeader.textContent = novoTitulo;
+            elements.footerText.textContent = `Desenvolvido para monitoramento de METAR/SPECI - ${CONFIG.localidade} - 2025`;
             document.title = `Monitor METAR - ${CONFIG.localidade}`;
         }
+
         function carregarPreferencias() {
             const volumeSalvo = localStorage.getItem('volumeAlarme');
             if (volumeSalvo) {
@@ -292,10 +313,12 @@
                 elements.aerodromoInput.value = aerodromoSalvo;
             }
         }
+
         function ajustarVolume() {
             elements.alertSound.volume = elements.volumeControl.value;
             localStorage.setItem('volumeAlarme', elements.volumeControl.value);
         }
+
         function toggleAutoRefresh() {
             state.consultaAtiva = elements.autoRefresh.checked;
             clearInterval(state.intervalId);
@@ -304,7 +327,9 @@
             }
             localStorage.setItem('autoRefresh', state.consultaAtiva);
         }
+
         function formatarHora(data) { return data.toTimeString().split(' ')[0]; }
+
         function atualizarContagemRegressiva() {
             const agora = new Date();
             const proximaHora = new Date(agora);
@@ -320,19 +345,25 @@
                 elements.nextCheckTime.textContent = 'Pausado';
             }
         }
+
         function atualizarStatus(texto, tipo) {
             elements.statusValue.textContent = texto;
             elements.statusIcon.className = 'status-icon';
             elements.statusIcon.classList.add(`status-${tipo}`);
         }
+
         function adicionarAoHistorico(metar, timestamp, horaUTC) {
             const indexExistente = state.historicoMetar.findIndex(item => item.horaUTC === horaUTC);
             const item = { metar, timestamp, horaUTC };
-            if (indexExistente !== -1) { state.historicoMetar[indexExistente] = item; }
-            else { state.historicoMetar.unshift(item); }
+            if (indexExistente !== -1) { 
+                state.historicoMetar[indexExistente] = item; 
+            } else { 
+                state.historicoMetar.unshift(item); 
+            }
             if (state.historicoMetar.length > CONFIG.maxHistorico) { state.historicoMetar.pop(); }
             atualizarHistorico();
         }
+
         function atualizarHistorico() {
             if (state.historicoMetar.length === 0) {
                 elements.historyContainer.innerHTML = '<p class="no-history">Nenhum histórico disponível</p>';
@@ -344,6 +375,7 @@
             });
             elements.historyContainer.innerHTML = html;
         }
+
         function verificarHoraCheia() {
             const agora = new Date();
             const minutos = agora.getUTCMinutes();
@@ -359,12 +391,23 @@
                 ativarAlerta();
             }
         }
+
         function ativarAlerta() {
+            if (!state.audioUnlocked) {
+                console.warn("Alerta ativado, mas o áudio está bloqueado. O usuário precisa interagir com a página.");
+            }
             state.emAlerta = true;
             elements.alertPanel.style.display = 'flex';
             elements.alertPanel.classList.add('alert-active');
-            elements.alertSound.play().catch(e => console.error("Erro ao tocar som de alerta:", e));
+            
+            const playPromise = elements.alertSound.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    console.error("Erro ao tocar som de alerta:", error.message);
+                });
+            }
         }
+
         function desativarAlerta() {
             state.emAlerta = false;
             elements.alertPanel.style.display = 'none';
@@ -372,6 +415,7 @@
             elements.alertSound.pause();
             elements.alertSound.currentTime = 0;
         }
+
         function silenciarAlarme() {
             state.alarmeSilenciado = true;
             desativarAlerta();
