@@ -598,7 +598,8 @@
 
                 if (data.data && data.data.data && data.data.data.length > 0) {
                     const metarMessage = data.data.data[0].mens;
-                    processarResposta(metarMessage);
+                    const recebimentoAPI = data.data.data[0].recebimento;
+                    processarResposta(metarMessage, recebimentoAPI);
                     atualizarStatus('OK', 'normal');
                 } else {
                     throw new Error(`Não há METAR recente disponível para ${CONFIG.localidade}.`);
@@ -614,7 +615,7 @@
             }
         }
         
-        function processarResposta(text) {
+        function processarResposta(text, recebimentoAPI) {
             const agora = new Date();
             elements.lastCheckTime.textContent = formatarHora(agora);
             const metarCompleto = text.trim();
@@ -628,14 +629,14 @@
                 const currentUTCDay = agora.getUTCDate();
                 
                 elements.metarRaw.textContent = metarCompleto;
-                elements.metarTime.textContent = `Recebido em: ${formatarHora(agora)} - Hora do METAR: ${match[3]}${match[4]}00Z`;
+                elements.metarTime.textContent = `Recebido em: ${recebimentoAPI} - Hora do METAR: ${match[3]}${match[4]}00Z`;
                 state.ultimoMetarCompleto = metarCompleto;
                 
                 if (metarHour === currentUTCHour && metarDay === currentUTCDay) {
                     state.metarHoraAtualEncontrado = true;
                     desativarAlerta();
                 }
-                adicionarAoHistorico(metarCompleto, agora, metarHour);
+                adicionarAoHistorico(metarCompleto, recebimentoAPI, metarHour);
             } else {
                 elements.metarRaw.textContent = metarCompleto;
                 elements.metarTime.textContent = `METAR recebido, mas formato não reconhecido para extrair hora.`;
@@ -719,9 +720,9 @@
             elements.statusIcon.classList.add(`status-${tipo}`);
         }
 
-        function adicionarAoHistorico(metar, timestamp, horaUTC) {
+        function adicionarAoHistorico(metar, recebimentoAPI, horaUTC) {
+            const item = { metar, timestamp: recebimentoAPI, horaUTC };
             const indexExistente = state.historicoMetar.findIndex(item => item.horaUTC === horaUTC);
-            const item = { metar, timestamp, horaUTC };
             if (indexExistente !== -1) { 
                 state.historicoMetar[indexExistente] = item; 
             } else { 
@@ -737,8 +738,8 @@
                 return;
             }
             let html = '';
-            [...state.historicoMetar].sort((a, b) => b.timestamp - a.timestamp).forEach(item => {
-                html += `<div class="history-item"><div class="history-metar">${item.metar}</div><div class="history-time">Recebido em: ${formatarHora(item.timestamp)} (Hora METAR: ${item.horaUTC.toString().padStart(2, '0')}Z)</div></div>`;
+            [...state.historicoMetar].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).forEach(item => {
+                html += `<div class="history-item"><div class="history-metar">${item.metar}</div><div class="history-time">Recebimento: ${item.timestamp} (Hora METAR: ${item.horaUTC.toString().padStart(2, '0')}Z)</div></div>`;
             });
             elements.historyContainer.innerHTML = html;
         }
