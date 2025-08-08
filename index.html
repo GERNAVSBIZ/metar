@@ -6,7 +6,8 @@
     <title>Monitor METAR/SPECI</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-        
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+
         :root {
             --primary-color: #0f172a;
             --primary-light: #1e293b;
@@ -456,11 +457,11 @@
                 </div>
                 
                 <div id="alertPanel" class="alert-panel" style="display: none;">
-                    <div id="alertMessage">ALERTA: METAR/SPECI NÃO ENCONTRADO!</div>
+                    <div id="alertMessage">ALERTA: METAR/SPECI DA HORA NÃO ENCONTRADO!</div>
                     <button id="silenceButton">Silenciar</button>
                 </div>
                 
-                <h3>ÚLTIMO METAR/SPECI DA HORA ATUAL</h3>
+                <h3>ÚLTIMO METAR/SPECI RECEBIDO</h3>
                 <div id="metarRaw" class="metar-display">Aguardando dados...</div>
                 <div id="metarTime" class="metar-time"></div>
             </div>
@@ -487,7 +488,7 @@
         
         <div class="sidebar">
             <div class="card history-panel">
-                <h3>Histórico de METAR/SPECI</h3>
+                <h3>Histórico de Mensagens</h3>
                 <div id="historyContainer">
                     <p class="no-history">Nenhum histórico disponível</p>
                 </div>
@@ -509,7 +510,7 @@
             apiKey: 'ttMZrBTp4mD0xMkYAVxKMzyu7B9KL1nfCS6T1fMR',
             apiUrl: 'https://api-redemet.decea.mil.br/mensagens/metar/',
             intervaloConsulta: 40000,
-            tempoAlerta: 2, 
+            tempoAlerta: 2, // Minutos após a hora cheia para disparar o alarme
             volumeAlarme: 0.7,
             maxHistorico: 10
         };
@@ -573,6 +574,7 @@
             document.addEventListener('click', unlockAudio);
 
             carregarPreferencias();
+            state.ultimaHoraVerificada = new Date().getUTCHours(); // Define a hora inicial
             consultarMetar(); 
             state.intervalId = setInterval(consultarMetar, CONFIG.intervaloConsulta);
             setInterval(verificarHoraCheia, 1000);
@@ -580,7 +582,6 @@
             atualizarTituloAerodromo();
         }
         
-        // --- FUNÇÃO DE CONSULTA ATUALIZADA E MAIS ROBUSTA ---
         async function consultarMetar() {
             if (!state.consultaAtiva) return;
 
@@ -597,50 +598,77 @@
                 }
 
                 if (data.data && data.data.data && data.data.data.length > 0) {
-                    const metarMessage = data.data.data[0].mens;
-                    const recebimentoAPI = data.data.data[0].recebimento;
-                    processarResposta(metarMessage, recebimentoAPI);
+                    processarResposta(data); 
                     atualizarStatus('OK', 'normal');
                 } else {
-                    throw new Error(`Não há METAR recente disponível para ${CONFIG.localidade}.`);
+                    throw new Error(`Não há METAR/SPECI recente disponível para ${CONFIG.localidade}.`);
                 }
 
             } catch (error) {
-                console.error(`Erro ao consultar METAR: ${error.message}`);
+                console.error(`Erro ao consultar METAR/SPECI: ${error.message}`);
                 atualizarStatus('Erro', 'error');
                 elements.metarRaw.textContent = `METAR/SPECI DE ${CONFIG.localidade} NÃO ENCONTRADO. ESTAMOS EFETUANDO NOVAS TENTATIVAS.`;
-                
-                // Ativar alarme imediatamente quando há erro na consulta
-                ativarAlerta();
             }
         }
         
-        function processarResposta(text, recebimentoAPI) {
+        // --- FUNÇÃO DE PROCESSAMENTO CORRIGIDA (NOVA VERSÃO) ---
+        function processarResposta(data) {
             const agora = new Date();
             elements.lastCheckTime.textContent = formatarHora(agora);
-            const metarCompleto = text.trim();
-            const regexMetarInfo = new RegExp(`(METAR|SPECI)\\s+(${CONFIG.localidade})\\s+(\\d{2})(\\d{2})\\d{2}Z`);
-            const match = metarCompleto.match(regexMetarInfo);
-            
-            if (match) {
-                const metarDay = parseInt(match[3], 10);
-                const metarHour = parseInt(match[4], 10);
-                const currentUTCHour = agora.getUTCHours();
-                const currentUTCDay = agora.getUTCDate();
+
+            const todasAsMensagens = data.data.data;
+
+            if (todasAsMensagens.length > 0) {
+                let mensagemParaExibir = null;
+
+                // Procura a mensagem SPECI primeiro
+                mensagemParaExibir = todasAsMensagens.find(mensagem => mensagem.mens.trim().startsWith('SPECI'));
                 
-                elements.metarRaw.textContent = metarCompleto;
-                elements.metarTime.textContent = `Recebido em: ${recebimentoAPI} - Hora do METAR: ${match[3]}${match[4]}00Z`;
-                state.ultimoMetarCompleto = metarCompleto;
-                
-                if (metarHour === currentUTCHour && metarDay === currentUTCDay) {
-                    state.metarHoraAtualEncontrado = true;
-                    desativarAlerta();
+                // Se não encontrar SPECI, usa a primeira mensagem da lista (que será o METAR mais recente)
+                if (!mensagemParaExibir) {
+                    mensagemParaExibir = todasAsMensagens[0];
                 }
-                adicionarAoHistorico(metarCompleto, recebimentoAPI, metarHour);
-            } else {
-                elements.metarRaw.textContent = metarCompleto;
-                elements.metarTime.textContent = `METAR recebido, mas formato não reconhecido para extrair hora.`;
+
+                const metarCompletoMaisRecente = mensagemParaExibir.mens.trim();
+                elements.metarRaw.textContent = metarCompletoMaisRecente;
+                state.ultimoMetarCompleto = metarCompletoMaisRecente;
+
+                const regexMetarInfo = new RegExp(`(METAR|SPECI)\\s+(${CONFIG.localidade})\\s+(\\d{2})(\\d{2})(\\d{2})Z`);
+                const match = metarCompletoMaisRecente.match(regexMetarInfo);
+
+                if (match) {
+                    const msgDay = parseInt(match[3], 10);
+                    const msgHour = parseInt(match[4], 10);
+                    const currentUTCHour = agora.getUTCHours();
+                    const currentUTCDay = agora.getUTCDate();
+                    
+                    elements.metarTime.textContent = `Recebido em: ${mensagemParaExibir.recebimento} - Hora da Mensagem: ${match[3]}${match[4]}${match[5]}Z`;
+
+                    if (msgHour === currentUTCHour && msgDay === currentUTCDay) {
+                        state.metarHoraAtualEncontrado = true;
+                        console.log(`Mensagem válida encontrada para a hora ${currentUTCHour}Z. Alarme desativado.`);
+                        desativarAlerta();
+                    }
+                } else {
+                     elements.metarTime.textContent = `Mensagem recebida, mas formato não reconhecido para extrair hora.`;
+                }
             }
+
+            // O restante do código para o histórico está correto e não precisa de alteração.
+            // Ele já itera sobre todas as mensagens para preencher o painel de histórico.
+            data.data.data.forEach(mensagem => {
+                const metarCompleto = mensagem.mens.trim();
+                const recebimentoAPI = mensagem.recebimento;
+                const matchMsg = metarCompleto.match(new RegExp(`(METAR|SPECI)\\s+(${CONFIG.localidade})\\s+(\\d{2})(\\d{2})(\\d{2})Z`));
+                
+                if (matchMsg) {
+                    const msgHour = parseInt(matchMsg[4], 10);
+                    const msgMinute = parseInt(matchMsg[5], 10);
+                    adicionarAoHistorico(metarCompleto, recebimentoAPI, msgHour, msgMinute);
+                }
+            });
+
+            atualizarHistorico();
         }
 
         function alterarAerodromo() {
@@ -650,10 +678,13 @@
                 return;
             }
             CONFIG.localidade = novoAerodromo;
-            state.historicoMetar = [];
+            state.historicoMetar = []; 
+            state.metarHoraAtualEncontrado = false; 
+            state.ultimaHoraVerificada = new Date().getUTCHours(); 
             elements.historyContainer.innerHTML = '<p class="no-history">Nenhum histórico disponível</p>';
             atualizarTituloAerodromo();
-            consultarMetar();
+            desativarAlerta(); 
+            consultarMetar(); 
             localStorage.setItem('aerodromo', CONFIG.localidade);
         }
 
@@ -720,26 +751,46 @@
             elements.statusIcon.classList.add(`status-${tipo}`);
         }
 
-        function adicionarAoHistorico(metar, recebimentoAPI, horaUTC) {
-            const item = { metar, timestamp: recebimentoAPI, horaUTC };
-            const indexExistente = state.historicoMetar.findIndex(item => item.horaUTC === horaUTC);
-            if (indexExistente !== -1) { 
-                state.historicoMetar[indexExistente] = item; 
-            } else { 
-                state.historicoMetar.unshift(item); 
+        // --- FUNÇÃO DE HISTÓRICO ATUALIZADA ---
+        function adicionarAoHistorico(metar, recebimentoAPI, horaUTC, minutoUTC) {
+            const idMensagem = `${horaUTC.toString().padStart(2, '0')}${minutoUTC.toString().padStart(2, '0')}Z ${metar}`;
+
+            // Evita adicionar a mesma mensagem (baseada no conteúdo e hora) múltiplas vezes
+            const jaExiste = state.historicoMetar.some(h => h.id === idMensagem);
+            
+            if (!jaExiste) { 
+                state.historicoMetar.unshift({ 
+                    id: idMensagem,
+                    metar: metar, 
+                    timestamp: recebimentoAPI, 
+                    horaUTC: horaUTC, 
+                    minutoUTC: minutoUTC 
+                }); 
             }
-            if (state.historicoMetar.length > CONFIG.maxHistorico) { state.historicoMetar.pop(); }
-            atualizarHistorico();
         }
 
         function atualizarHistorico() {
+            // Ordena por data de recebimento para garantir que o mais novo esteja no topo
+            state.historicoMetar.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+            
+            // Limita o tamanho do histórico
+            if (state.historicoMetar.length > CONFIG.maxHistorico) { 
+                state.historicoMetar = state.historicoMetar.slice(0, CONFIG.maxHistorico);
+            }
+
             if (state.historicoMetar.length === 0) {
                 elements.historyContainer.innerHTML = '<p class="no-history">Nenhum histórico disponível</p>';
                 return;
             }
+
             let html = '';
-            [...state.historicoMetar].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).forEach(item => {
-                html += `<div class="history-item"><div class="history-metar">${item.metar}</div><div class="history-time">Recebimento: ${item.timestamp} (Hora METAR: ${item.horaUTC.toString().padStart(2, '0')}Z)</div></div>`;
+            state.historicoMetar.forEach(item => {
+                const tipo = item.metar.startsWith('SPECI') ? 'SPECI' : 'METAR';
+                const horaMsg = `${item.horaUTC.toString().padStart(2, '0')}${item.minutoUTC.toString().padStart(2, '0')}Z`;
+                html += `<div class="history-item">
+                            <div class="history-metar"><strong>[${tipo}]</strong> ${item.metar}</div>
+                            <div class="history-time">Recebimento: ${item.timestamp} (Hora Msg: ${horaMsg})</div>
+                        </div>`;
             });
             elements.historyContainer.innerHTML = html;
         }
@@ -749,13 +800,17 @@
             const minutos = agora.getUTCMinutes();
             const segundos = agora.getUTCSeconds();
             const horaAtual = agora.getUTCHours();
+            
             if (minutos === 0 && segundos === 0 && state.ultimaHoraVerificada !== horaAtual) {
+                console.log(`Iniciando nova hora UTC: ${horaAtual}Z. Resetando status.`);
                 state.metarHoraAtualEncontrado = false;
                 state.alarmeSilenciado = false;
                 state.ultimaHoraVerificada = horaAtual;
                 desativarAlerta();
             }
+            
             if (minutos >= CONFIG.tempoAlerta && !state.metarHoraAtualEncontrado && !state.emAlerta && !state.alarmeSilenciado) {
+                console.warn(`ALERTA: Nenhuma mensagem (METAR ou SPECI) encontrada para a hora ${state.ultimaHoraVerificada}Z após ${CONFIG.tempoAlerta} minutos.`);
                 ativarAlerta();
             }
         }
@@ -771,7 +826,9 @@
             const playPromise = elements.alertSound.play();
             if (playPromise !== undefined) {
                 playPromise.catch(error => {
-                    console.error("Erro ao tocar som de alerta:", error.message);
+                    if (error.name !== "NotAllowedError") {
+                      console.error("Erro ao tocar som de alerta:", error.message);
+                    }
                 });
             }
         }
@@ -781,12 +838,15 @@
             elements.alertPanel.style.display = 'none';
             elements.alertPanel.classList.remove('alert-active');
             elements.alertSound.pause();
-            elements.alertSound.currentTime = 0;
+            if(elements.alertSound.currentTime > 0) {
+               elements.alertSound.currentTime = 0;
+            }
         }
 
         function silenciarAlarme() {
             state.alarmeSilenciado = true;
             desativarAlerta();
+            console.log(`Alarme silenciado para a hora ${state.ultimaHoraVerificada}Z.`);
         }
     </script>
 </body>
