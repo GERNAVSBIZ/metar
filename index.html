@@ -126,14 +126,16 @@
         .setting input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--secondary-color); }
         .setting button { padding: 8px 16px; background: linear-gradient(135deg, var(--secondary-color) 0%, #2563eb 100%); color: white; border: none; border-radius: var(--border-radius-sm); cursor: pointer; }
         
-        /* --- NOVA SEÇÃO DE BUSCA --- */
         .historical-search { margin-top: 32px; }
-        .historical-search-form { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
-        .historical-search-form input { padding: 10px; border: 2px solid rgba(148, 163, 184, 0.3); border-radius: var(--border-radius-sm); font-size: 1rem; }
-        .historical-search-form button { padding: 10px 20px; font-size: 1rem; background: var(--primary-color); color: white; border: none; border-radius: var(--border-radius-sm); cursor: pointer; transition: var(--transition); }
-        .historical-search-form button:hover { background: var(--primary-light); }
+        .search-controls { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; }
+        .search-controls input[type="text"], .search-controls input[type="date"], .search-controls input[type="month"] { padding: 10px; border: 2px solid rgba(148, 163, 184, 0.3); border-radius: var(--border-radius-sm); font-size: 1rem; }
+        .search-controls button { padding: 10px 20px; font-size: 1rem; background: var(--primary-color); color: white; border: none; border-radius: var(--border-radius-sm); cursor: pointer; transition: var(--transition); }
+        .search-controls button:hover { background: var(--primary-light); }
+        .search-controls button:disabled { background: var(--text-muted); cursor: not-allowed; }
         #historicalSearchStatus { margin-top: 16px; font-weight: 500; }
-        
+        .search-type-selector { margin-bottom: 16px; display: flex; gap: 16px; align-items: center; font-weight: 500;}
+        .hidden { display: none; }
+
         footer { margin-top: 48px; text-align: center; color: var(--text-muted); }
         
         .modal-overlay {
@@ -221,12 +223,26 @@
     <div class="historical-search-container">
         <div class="card historical-search">
             <h3>Busca Histórica e Relatórios</h3>
-            <div class="historical-search-form">
+            
+            <div class="search-type-selector">
+                <strong>Tipo de Busca:</strong>
+                <label><input type="radio" name="searchType" value="daily" id="radioDiario" checked> Diário</label>
+                <label><input type="radio" name="searchType" value="monthly" id="radioMensal"> Mensal</label>
+            </div>
+
+            <div class="search-controls">
                 <label for="historicalAerodromoInput">Código ICAO:</label>
                 <input type="text" id="historicalAerodromoInput" maxlength="4" style="text-transform: uppercase; width: 100px;">
                 
-                <label for="historicalDateInput">Data:</label>
-                <input type="date" id="historicalDateInput">
+                <div id="dailyInputContainer">
+                    <label for="historicalDateInput">Data:</label>
+                    <input type="date" id="historicalDateInput">
+                </div>
+                
+                <div id="monthlyInputContainer" class="hidden">
+                    <label for="historicalMonthInput">Mês/Ano:</label>
+                    <input type="month" id="historicalMonthInput">
+                </div>
                 
                 <button id="generateHistoricalReportBtn">Gerar Relatório</button>
             </div>
@@ -280,8 +296,13 @@
             
             historicalAerodromoInput: document.getElementById('historicalAerodromoInput'),
             historicalDateInput: document.getElementById('historicalDateInput'),
+            historicalMonthInput: document.getElementById('historicalMonthInput'),
             generateHistoricalReportBtn: document.getElementById('generateHistoricalReportBtn'),
-            historicalSearchStatus: document.getElementById('historicalSearchStatus')
+            historicalSearchStatus: document.getElementById('historicalSearchStatus'),
+            radioDiario: document.getElementById('radioDiario'),
+            radioMensal: document.getElementById('radioMensal'),
+            dailyInputContainer: document.getElementById('dailyInputContainer'),
+            monthlyInputContainer: document.getElementById('monthlyInputContainer')
         };
 
         const state = {
@@ -327,11 +348,219 @@
             setInterval(atualizarContagemRegressiva, 1000);
             atualizarTituloAerodromo();
 
+            // --- INICIALIZAÇÃO DA BUSCA HISTÓRICA ---
             elements.historicalAerodromoInput.value = CONFIG.localidade;
             elements.historicalDateInput.valueAsDate = new Date();
-            elements.generateHistoricalReportBtn.addEventListener('click', buscarHistoricoEGerarPDF);
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = (today.getMonth() + 1).toString().padStart(2, '0');
+            elements.historicalMonthInput.value = `${year}-${month}`;
+            
+            elements.radioDiario.addEventListener('change', toggleSearchType);
+            elements.radioMensal.addEventListener('change', toggleSearchType);
+            elements.generateHistoricalReportBtn.addEventListener('click', iniciarBuscaHistorica);
         }
         
+        function toggleSearchType() {
+            if (elements.radioDiario.checked) {
+                elements.dailyInputContainer.classList.remove('hidden');
+                elements.monthlyInputContainer.classList.add('hidden');
+            } else {
+                elements.dailyInputContainer.classList.add('hidden');
+                elements.monthlyInputContainer.classList.remove('hidden');
+            }
+        }
+        
+        function iniciarBuscaHistorica() {
+            if (elements.radioDiario.checked) {
+                buscarHistoricoDiarioEGerarPDF();
+            } else {
+                buscarHistoricoMensalEGerarPDF();
+            }
+        }
+
+        async function buscarHistoricoDiarioEGerarPDF() {
+            const icao = elements.historicalAerodromoInput.value.trim().toUpperCase();
+            const date = elements.historicalDateInput.value;
+            const statusEl = elements.historicalSearchStatus;
+            const buttonEl = elements.generateHistoricalReportBtn;
+
+            if (!/^[A-Z]{4}$/.test(icao) || !date) {
+                statusEl.textContent = 'Erro: Verifique o ICAO e a data selecionada.';
+                statusEl.style.color = 'var(--alert-color)';
+                return;
+            }
+            
+            buttonEl.disabled = true;
+            statusEl.textContent = 'Buscando dados na REDEMET...';
+            statusEl.style.color = 'var(--text-muted)';
+            
+            const data_ini = date.replace(/-/g, '') + '00';
+            const data_fim = date.replace(/-/g, '') + '23';
+
+            const url = `${CONFIG.apiUrl}${icao}?api_key=${CONFIG.apiKey}&data_ini=${data_ini}&data_fim=${data_fim}`;
+
+            try {
+                const response = await fetch(url, { cache: 'no-store' });
+                const data = await response.json();
+                
+                if (!response.ok) throw new Error(`Erro de rede: ${response.statusText}`);
+                if (!data.status && data.message && !data.message.includes("data inicial ou final")) throw new Error(data.message);
+
+                if (data.data && data.data.data && data.data.data.length > 0) {
+                    statusEl.textContent = `Encontradas ${data.data.data.length} mensagens. Gerando PDF...`;
+                    statusEl.style.color = 'var(--success-color)';
+                    gerarPDFHistorico(data.data.data, icao, date, 'daily');
+                } else {
+                    const dataFormatada = new Date(date.replace(/-/g, '/')).toLocaleDateString();
+                    statusEl.textContent = `Nenhuma mensagem encontrada para ${icao} na data ${dataFormatada}.`;
+                    statusEl.style.color = 'var(--warning-color)';
+                }
+            } catch (error) {
+                console.error("Erro na busca diária:", error);
+                statusEl.textContent = `Erro ao buscar dados: ${error.message}`;
+                statusEl.style.color = 'var(--alert-color)';
+            } finally {
+                buttonEl.disabled = false;
+            }
+        }
+        
+        async function buscarHistoricoMensalEGerarPDF() {
+            const icao = elements.historicalAerodromoInput.value.trim().toUpperCase();
+            const monthValue = elements.historicalMonthInput.value;
+            const statusEl = elements.historicalSearchStatus;
+            const buttonEl = elements.generateHistoricalReportBtn;
+
+            if (!/^[A-Z]{4}$/.test(icao) || !monthValue) {
+                statusEl.textContent = 'Erro: Verifique o ICAO e o Mês/Ano selecionado.';
+                statusEl.style.color = 'var(--alert-color)';
+                return;
+            }
+            
+            buttonEl.disabled = true;
+            buttonEl.textContent = 'Buscando...';
+
+            const [year, month] = monthValue.split('-').map(Number);
+            const daysInMonth = new Date(year, month, 0).getDate();
+            let todasAsMensagens = [];
+
+            try {
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const dayString = day.toString().padStart(2, '0');
+                    const monthString = month.toString().padStart(2, '0');
+                    const dateString = `${year}${monthString}${dayString}`;
+                    
+                    statusEl.textContent = `Buscando dados para o dia ${day} de ${daysInMonth}...`;
+                    statusEl.style.color = 'var(--text-muted)';
+
+                    const data_ini = dateString + '00';
+                    const data_fim = dateString + '23';
+                    const url = `${CONFIG.apiUrl}${icao}?api_key=${CONFIG.apiKey}&data_ini=${data_ini}&data_fim=${data_fim}`;
+
+                    const response = await fetch(url, { cache: 'no-store' });
+                    const data = await response.json();
+                    
+                    if (data.status && data.data && data.data.data && data.data.data.length > 0) {
+                        todasAsMensagens.push(...data.data.data);
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                }
+
+                if (todasAsMensagens.length > 0) {
+                    statusEl.textContent = `Total de ${todasAsMensagens.length} mensagens encontradas. Gerando PDF...`;
+                    statusEl.style.color = 'var(--success-color)';
+                    gerarPDFHistorico(todasAsMensagens, icao, monthValue, 'monthly');
+                } else {
+                    const monthName = new Date(year, month - 1, 1).toLocaleString('pt-BR', { month: 'long' });
+                    statusEl.textContent = `Nenhuma mensagem encontrada para ${icao} em ${monthName} de ${year}.`;
+                    statusEl.style.color = 'var(--warning-color)';
+                }
+
+            } catch (error) {
+                console.error("Erro na busca mensal:", error);
+                statusEl.textContent = `Erro ao buscar dados: ${error.message}`;
+                statusEl.style.color = 'var(--alert-color)';
+            } finally {
+                buttonEl.disabled = false;
+                buttonEl.textContent = 'Gerar Relatório';
+            }
+        }
+
+        // =====================================================================
+        // AQUI COMEÇA A FUNÇÃO MODIFICADA
+        // =====================================================================
+        function gerarPDFHistorico(mensagens, icao, dateValue, type) {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            let title, filename;
+
+            if (type === 'daily') {
+                const dataFormatada = new Date(dateValue.replace(/-/g, '/')).toLocaleDateString('pt-BR');
+                title = `Relatório Diário - ${icao} - ${dataFormatada}`;
+                filename = `relatorio_diario_${icao}_${dateValue}.pdf`;
+            } else { // monthly
+                const [year, month] = dateValue.split('-');
+                const monthName = new Date(year, month - 1, 1).toLocaleString('pt-BR', { month: 'long' });
+                const formattedMonth = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+                title = `Relatório Mensal - ${icao} - ${formattedMonth} de ${year}`;
+                filename = `relatorio_mensal_${icao}_${dateValue}.pdf`;
+            }
+            
+            doc.text(title, 14, 15);
+            
+            // 1. Adicionada a nova coluna "Hora UTC (Msg)"
+            const tableColumn = ["Tipo", "Data Recebimento", "Hora Recebimento", "Hora UTC (Msg)"];
+            
+            const dadosFormatados = mensagens.map(msg => {
+                // Regex para encontrar o grupo de data/hora na mensagem (ex: 011230Z)
+                const match = msg.mens.trim().match(/\s(\d{2})(\d{2})(\d{2})Z/);
+                let horaUTC = '--:--Z';
+                if (match) {
+                    const hora = match[2];
+                    const minuto = match[3];
+                    horaUTC = `${hora}:${minuto}Z`;
+                }
+                
+                return {
+                    tipo: msg.mens.trim().startsWith('SPECI') ? 'SPECI' : 'METAR',
+                    timestamp: new Date(msg.recebimento),
+                    horaUTC: horaUTC // Armazena a hora extraída
+                };
+            }).sort((a,b) => a.timestamp - b.timestamp);
+
+            const tableRows = dadosFormatados.map(d => [
+                d.tipo, 
+                d.timestamp.toLocaleDateString('pt-BR'), 
+                d.timestamp.toLocaleTimeString('pt-BR'),
+                d.horaUTC // Adiciona o novo dado na linha da tabela
+            ]);
+            
+            doc.autoTable({
+                head: [tableColumn], 
+                body: tableRows, 
+                startY: 20,
+                didParseCell: function(data) {
+                    if (data.section === 'body') {
+                        const originalData = dadosFormatados[data.row.index];
+                        const minutoRecebimento = originalData.timestamp.getMinutes();
+                        
+                        // 2. Condição ajustada para destacar apenas METAR fora do padrão
+                        if (minutoRecebimento >= 5 && minutoRecebimento < 55 && originalData.tipo === 'METAR') {
+                            data.cell.styles.textColor = [239, 68, 68]; // Vermelho
+                        }
+                    }
+                }
+            });
+            
+            doc.save(filename);
+            elements.historicalSearchStatus.textContent = `Relatório gerado com sucesso!`;
+        }
+        // =====================================================================
+        // AQUI TERMINA A FUNÇÃO MODIFICADA
+        // =====================================================================
+
+        // --- RESTANTE DAS FUNÇÕES DO MONITOR EM TEMPO REAL ---
+
         async function consultarMetar() {
             if (!state.consultaAtiva) return;
             atualizarStatus('Consultando...', 'warning');
@@ -340,12 +569,11 @@
                 const response = await fetch(url, { cache: 'no-store' });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.message || `Erro de rede: ${response.statusText}`);
-                if (!data.status) throw new Error(data.message || `API retornou status 'false'`);
+                if (!data.status && data.message) throw new Error(data.message);
                 if (data.data && data.data.data && data.data.data.length > 0) {
                     processarResposta(data); 
                     atualizarStatus('OK', 'normal');
                 } else { 
-                    // Não lança erro se não houver dados, apenas informa. O alarme cuidará da falta de METAR.
                     elements.metarRaw.textContent = `Aguardando METAR/SPECI para ${CONFIG.localidade}...`;
                 }
             } catch (error) {
@@ -380,91 +608,6 @@
                 adicionarDadoDeRecebimento(mensagem.recebimento, tipo);
             });
             atualizarHistorico();
-        }
-        
-        async function buscarHistoricoEGerarPDF() {
-            const icao = elements.historicalAerodromoInput.value.trim().toUpperCase();
-            const date = elements.historicalDateInput.value;
-            const statusEl = elements.historicalSearchStatus;
-
-            if (!/^[A-Z]{4}$/.test(icao)) {
-                statusEl.textContent = 'Erro: Por favor, insira um código ICAO válido (4 letras).';
-                statusEl.style.color = 'var(--alert-color)';
-                return;
-            }
-            if (!date) {
-                statusEl.textContent = 'Erro: Por favor, selecione uma data.';
-                statusEl.style.color = 'var(--alert-color)';
-                return;
-            }
-
-            statusEl.textContent = 'Buscando dados na REDEMET...';
-            statusEl.style.color = 'var(--text-muted)';
-            
-            const data_ini = date.replace(/-/g, '') + '00';
-            const data_fim = date.replace(/-/g, '') + '23';
-
-            const url = `${CONFIG.apiUrl}${icao}?api_key=${CONFIG.apiKey}&data_ini=${data_ini}&data_fim=${data_fim}`;
-
-            try {
-                const response = await fetch(url, { cache: 'no-store' });
-                const data = await response.json();
-                
-                if (!response.ok) throw new Error(`Erro de rede: ${response.statusText}`);
-                if (!data.status) throw new Error(data.message || `API retornou status 'false'`);
-
-                if (data.data && data.data.data && data.data.data.length > 0) {
-                    statusEl.textContent = `Encontradas ${data.data.data.length} mensagens. Gerando PDF...`;
-                    statusEl.style.color = 'var(--success-color)';
-                    gerarPDFHistorico(data.data.data, icao, date);
-                } else {
-                    const dataFormatada = new Date(date.replace(/-/g, '/')).toLocaleDateString();
-                    statusEl.textContent = `Nenhuma mensagem encontrada para ${icao} na data ${dataFormatada}.`;
-                    statusEl.style.color = 'var(--warning-color)';
-                }
-            } catch (error) {
-                console.error("Erro na busca histórica:", error);
-                statusEl.textContent = `Erro ao buscar dados: ${error.message}`;
-                statusEl.style.color = 'var(--alert-color)';
-            }
-        }
-
-        function gerarPDFHistorico(mensagens, icao, date) {
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF();
-            
-            const dataFormatada = new Date(date.replace(/-/g, '/')).toLocaleDateString('pt-BR');
-            doc.text(`Relatório Histórico - ${icao} - ${dataFormatada}`, 14, 15);
-            
-            const tableColumn = ["Tipo", "Data Recebimento", "Hora Recebimento"];
-            
-            const dadosFormatados = mensagens.map(msg => ({
-                tipo: msg.mens.trim().startsWith('SPECI') ? 'SPECI' : 'METAR',
-                timestamp: new Date(msg.recebimento)
-            })).sort((a,b) => a.timestamp - b.timestamp);
-
-            const tableRows = dadosFormatados.map(d => [
-                d.tipo, 
-                d.timestamp.toLocaleDateString('pt-BR'), 
-                d.timestamp.toLocaleTimeString('pt-BR')
-            ]);
-            
-            doc.autoTable({
-                head: [tableColumn], 
-                body: tableRows, 
-                startY: 20,
-                didParseCell: function(data) {
-                    if (data.section === 'body') {
-                        const originalData = dadosFormatados[data.row.index];
-                        const minuto = originalData.timestamp.getMinutes();
-                        if (minuto >= 5 && minuto < 55) {
-                            data.cell.styles.textColor = [239, 68, 68];
-                        }
-                    }
-                }
-            });
-            doc.save(`relatorio_historico_${icao}_${date}.pdf`);
-            elements.historicalSearchStatus.textContent = `Relatório de ${icao} para ${dataFormatada} gerado com sucesso!`;
         }
 
         function toggleAutoRefresh() {
